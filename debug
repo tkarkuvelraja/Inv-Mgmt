@@ -1,0 +1,399 @@
+begin  
+   if inserting then 
+      if :NEW."DEBUG_ID" is null then 
+         select FXGN_DEBUG_S.nextval into :NEW."DEBUG_ID" from dual; 
+      end if; 
+   end if; 
+end;
+/
+
+
+  CREATE TABLE "FXO"."FXGN_DEBUG" 
+   (	"REQUEST_ID" VARCHAR2(30 BYTE), 
+	"MSG_INDEX" NUMBER, 
+	"PACKAGE_NAME" VARCHAR2(100 BYTE), 
+	"PROCEDURE_NAME" VARCHAR2(100 BYTE), 
+	"RUN_DATE" DATE, 
+	"EVENT_NAME" VARCHAR2(240 BYTE), 
+	"PK_NAME" VARCHAR2(100 BYTE), 
+	"PK_VALUE" VARCHAR2(100 BYTE), 
+	"MESSAGE_TEXT" VARCHAR2(2000 BYTE), 
+	"MESSAGE_TYPE" VARCHAR2(10 BYTE), 
+	"CLOB_DATA" CLOB, 
+	"DEBUG_ID" NUMBER(10,0)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "APEX_FXGN_LOG_DATA" 
+ LOB ("CLOB_DATA") STORE AS SECUREFILE (
+  TABLESPACE "APEX_42679066371119201" ENABLE STORAGE IN ROW CHUNK 8192
+  NOCACHE LOGGING  NOCOMPRESS  KEEP_DUPLICATES 
+  STORAGE(INITIAL 106496 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)) ;
+
+  CREATE OR REPLACE EDITIONABLE TRIGGER "FXO"."FXGN_DEBUG_BI" 
+   before insert on "FXO"."FXGN_DEBUG" 
+   for each row 
+begin  
+   if inserting then 
+      if :NEW."DEBUG_ID" is null then 
+         select FXGN_DEBUG_S.nextval into :NEW."DEBUG_ID" from dual; 
+      end if; 
+   end if; 
+end;
+
+/
+ALTER TRIGGER "FXO"."FXGN_DEBUG_BI" ENABLE;
+
+/
+
+
+   CREATE SEQUENCE  "FXO"."FXGN_DEBUG_S"  MINVALUE 1 MAXVALUE 9999999999999999999999999999 INCREMENT BY 1 START WITH 6559881 CACHE 20 NOORDER  NOCYCLE  NOKEEP  NOSCALE  GLOBAL ;
+
+/
+create or replace 
+PACKAGE FXGN_DEBUG_PKG AUTHID CURRENT_USER AS
+/* $Id: XXDC_DEBUG_PKG.pls 6354 2015-02-25 11:11:28Z sasanka.rath $ */
+
+/*
+--Usage    1. initialize the Debugger (One time )
+--         XXDC_DEBUG_PKG.init('<<Package Name>>');   
+--         2. Set the Context (Optional Step) (one time for each procedure or in case you want to change any of the below
+--            parameters
+--            XXDC_DEBUG_PKG.SET_CONTEXT(P_PROCEDURE => 'Procedure Name within the Package '
+--                                      ,P_EVENT     => 'Event for which we are recording the Debug Message' 
+--						                ,P_PK_NAME   => '<<Name of the Primry key eg. SR Number, Order Number, Reg id...'
+--						                ,P_PK_VALUE  => '<<Value of the Primary key Field>>>'
+--                        );
+--         3. Add the debugging message
+--            XXDC_DEBUG_PKG.add  ('<<Debug Message - 2000 Charcters>>' ) ;
+--         The debug messages get stored in the table XXDC_DEBUG_TABLE and gets cleared after 30 days
+*/
+--  Global constants used by the Get function/procedure to
+--  determine which message to get.
+
+    G_FIRST         CONSTANT    NUMBER  :=  -1  ;
+    G_NEXT          CONSTANT    NUMBER  :=  -2  ;
+    G_LAST          CONSTANT    NUMBER  :=  -3  ;
+    G_PREVIOUS      CONSTANT    NUMBER  :=  -4  ;
+
+ --
+ --  Index used by the Get function to keep track of the last fetched
+ --  message.
+ G_MSG_INDEX            NUMBER          := 0;
+
+ -----------------------------------------------------------------
+ --  Procedure  Initialize
+ --
+ --  Usage      Used to initialize the global message table.
+ --  Desc       Clears the G_msg_tbl and resets all its global variables. 
+ --
+   PROCEDURE init(P_PACKAGE IN VARCHAR2);
+
+ -----------------------------------------------------------------------
+ --  Procedure  SET_CONTEXT
+ --
+ --  Usage      Used to set the context of the messages.
+ --             Accepts the procedure name, event name, pk name and the value for the primary key
+ --             All optional 
+ --   
+   PROCEDURE SET_CONTEXT(P_PROCEDURE   IN VARCHAR2 DEFAULT NULL
+                        ,P_EVENT       IN VARCHAR2 DEFAULT NULL
+                        ,P_PK_NAME     IN VARCHAR2 DEFAULT NULL
+                        ,P_PK_VALUE    IN VARCHAR2 DEFAULT NULL
+                        );
+
+ --  FUNCTION   Count_Msg
+ --
+ --  Usage       Used to find the count of messages in the  message list.
+ --  Desc        Returns the value of G_MSG_COUNT
+ --
+ --  Parameters  None
+ --
+ --  Return      NUMBER
+
+   FUNCTION    COUNT_MSG  RETURN NUMBER;
+
+   -- PROCEDURE   add
+   --
+   --  Usage       Used to add messages  of Type ERROR, INFORMATION or DEBUG to XXDC_DEBUG_TABLE 
+   --  Desc        Accepts the  message and Message Type (Optional) as input 
+   --
+
+     PROCEDURE add  (p_message_text  IN VARCHAR2, p_message_type VARCHAR2 DEFAULT 'DEBUG' );
+     PROCEDURE add_clob (p_clob_message CLOB ,p_message_type VARCHAR2 DEFAULT 'DEBUG' );
+
+ --  FUNCTION    Get
+ --
+ --  Usage       Used to get message info from the message table.
+ --
+ --  Desc        Gets the next message from the message table.
+ --              This procedure utilizes the G_msg_index to keep track
+ --              of the last message fetched from the table and
+ --              then fetches the next or previous message depending on
+ --              the mode the function is being called in..
+ --
+ --                  Index of message to be fetched. the default is to
+ --                  fetch the next message starting by the first
+ --                  message. Possible values are :
+ --
+ --                  G_FIRST
+ --                  G_NEXT
+ --                  G_LAST
+ --                  G_PREVIOUS
+ --                  Specific message index.
+ --
+ --
+ --  Return      VARCHAR2(2000) message data.
+ --              If there are no more messages it returns NULL.
+ --
+ --  Notes       The function name Get is overloaded with another
+ --              procedure Get that performs the exact same function as
+ --              the function, the only difference is that the
+ --              procedure returns the message data as well as its
+ --              index i the message list.
+
+PROCEDURE    Get(
+                p_msg_index	    IN  NUMBER	    := G_NEXT
+                ,p_PACKAGE_NAME     OUT NOCOPY VARCHAR2
+                ,p_PROCEDURE_NAME   OUT NOCOPY VARCHAR2
+                ,p_RUN_DATE         OUT NOCOPY DATE 
+                ,p_EVENT_NAME       OUT NOCOPY VARCHAR2
+                ,p_PK_NAME          OUT NOCOPY VARCHAR2
+                ,p_PK_VALUE         OUT NOCOPY VARCHAR2
+                ,P_MESSAGE          OUT NOCOPY VARCHAR2
+                ,P_MESSAGE_TYPE     OUT NOCOPY VARCHAR2
+                );
+
+
+ END FXGN_DEBUG_PKG;
+ /
+ create or replace 
+PACKAGE BODY FXGN_DEBUG_PKG AS
+ /* $Id$ */
+
+ --  Global Variables used 
+   G_PKG_NAME      VARCHAR2(50);
+   G_PROC_NAME     VARCHAR2(50);
+   G_REQUEST_ID    VARCHAR2(30);
+   G_EVENT         VARCHAR2(100);
+   G_PK_NAME       VARCHAR2(50);
+   G_PK_VALUE      VARCHAR2(50);
+
+
+   PROCEDURE init(p_package IN VARCHAR2) IS    
+   BEGIN
+
+      g_msg_index := 0;
+
+      SELECT TO_CHAR(SYSDATE,'ddmmyyyyHH24MISS') 
+      into   G_REQUEST_ID
+      from   dual
+      ;
+      G_PKG_NAME      := p_package;
+
+      --
+      --Clean up the Records which are 30 days old
+      --
+      DELETE FROM FXGN_DEBUG
+      WHERE TRUNC(RUN_DATE) <= TRUNC(SYSDATE - 3)
+      ;
+      commit;
+
+      --
+   EXCEPTION
+     WHEN OTHERS THEN
+         G_REQUEST_ID := -1;
+   END;
+
+   PROCEDURE SET_CONTEXT(P_PROCEDURE   IN VARCHAR2 DEFAULT NULL
+                        ,P_EVENT       IN VARCHAR2 DEFAULT NULL
+                        ,P_PK_NAME     IN VARCHAR2 DEFAULT NULL
+                        ,P_PK_VALUE    IN VARCHAR2 DEFAULT NULL
+                        ) IS
+   BEGIN
+      G_PROC_NAME      := p_procedure;
+      G_EVENT          := P_EVENT ;
+      G_PK_NAME        := P_PK_NAME;
+      G_PK_VALUE       := P_PK_VALUE;
+
+      --
+      --Clean up Records which are processed for the same Primary Key and Procedure
+      --
+      DELETE FROM FXGN_DEBUG 
+      WHERE  UPPER(PROCEDURE_NAME) = UPPER(P_PROCEDURE)
+      AND    UPPER(PK_VALUE) = UPPER(P_PK_VALUE)
+      ;
+      COMMIT;
+
+   END SET_CONTEXT;
+
+--
+--  Usage	Used to find the count of messages in the  message list.
+--  Desc	Returns the value of G_msg_count
+--
+--  Parameters	None
+--
+--  Return	NUMBER
+
+   FUNCTION    Count_Msg RETURN NUMBER IS
+   BEGIN
+      RETURN g_msg_index;
+   EXCEPTION WHEN OTHERS THEN
+      RETURN -1;
+   END Count_Msg;
+
+--  PROCEDURE 	add
+--
+--  Usage	Used to add messages to Global 
+--  Desc	Accepts the  message as input and writes to global_PL/SQL
+--              message table.
+--  	    	The message is appended at the bottom of the message
+--    	    	table.  
+    PROCEDURE add  (p_message_text  IN VARCHAR2,p_message_type VARCHAR2 DEFAULT 'DEBUG' ) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;                  
+    BEGIN
+
+        --Increment message count
+        g_msg_index := g_msg_index + 1;
+
+        INSERT INTO FXGN_DEBUG 
+        (
+        REQUEST_ID
+        ,PACKAGE_NAME
+        ,PROCEDURE_NAME
+        ,MSG_INDEX
+        ,PK_NAME
+        ,PK_VALUE
+        ,EVENT_NAME
+        ,RUN_DATE
+        ,MESSAGE_TEXT
+        ,MESSAGE_TYPE
+        )
+        VALUES
+        (
+        G_REQUEST_ID
+        ,G_PKG_NAME
+        ,G_PROC_NAME
+        ,G_MSG_INDEX
+        ,G_PK_NAME
+        ,G_PK_VALUE
+        ,G_EVENT
+        ,SYSDATE
+        ,P_MESSAGE_TEXT  
+        ,p_message_type
+        );
+        commit;
+
+    EXCEPTION WHEN OTHERS THEN
+       g_msg_index := g_msg_index - 1;
+    END add;
+
+    PROCEDURE add_clob  (p_clob_message IN CLOB,p_message_type VARCHAR2 DEFAULT 'DEBUG' ) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;                  
+    BEGIN
+
+        --Increment message count
+        g_msg_index := g_msg_index + 1;
+
+        INSERT INTO FXGN_DEBUG 
+        (
+        REQUEST_ID
+        ,PACKAGE_NAME
+        ,PROCEDURE_NAME
+        ,MSG_INDEX
+        ,PK_NAME
+        ,PK_VALUE
+        ,EVENT_NAME
+        ,RUN_DATE
+        ,CLOB_DATA
+        ,MESSAGE_TYPE
+        ,MESSAGE_TEXT
+        )
+        VALUES
+        (
+        G_REQUEST_ID
+        ,G_PKG_NAME
+        ,G_PROC_NAME
+        ,G_MSG_INDEX
+        ,G_PK_NAME
+        ,G_PK_VALUE
+        ,G_EVENT
+        ,SYSDATE
+        ,p_clob_message
+        ,p_message_type
+        ,'CLOB_DATA'
+        );
+        commit;
+
+    EXCEPTION WHEN OTHERS THEN
+       g_msg_index := g_msg_index - 1;
+    END add_clob;
+
+
+  --  PROCEDURE 	Get
+  --
+
+PROCEDURE    Get(
+                p_msg_index	    IN  NUMBER	    := G_NEXT
+                ,p_PACKAGE_NAME     OUT NOCOPY VARCHAR2
+                ,p_PROCEDURE_NAME   OUT NOCOPY VARCHAR2
+                ,p_RUN_DATE         OUT NOCOPY DATE 
+                ,p_EVENT_NAME       OUT NOCOPY VARCHAR2
+                ,p_PK_NAME          OUT NOCOPY VARCHAR2
+                ,p_PK_VALUE         OUT NOCOPY VARCHAR2
+                ,P_MESSAGE          OUT NOCOPY VARCHAR2
+                ,P_MESSAGE_TYPE     OUT NOCOPY VARCHAR2
+                ) IS
+    l_msg_index NUMBER := G_msg_index;
+    --
+  BEGIN
+
+    IF p_msg_index = G_NEXT THEN
+	G_msg_index := G_msg_index + 1;
+    ELSIF p_msg_index = G_FIRST THEN
+	G_msg_index := 1;
+    ELSIF p_msg_index = G_PREVIOUS THEN
+	G_msg_index := G_msg_index - 1;
+    ELSIF p_msg_index = G_LAST THEN
+	G_msg_index := G_msg_index ;
+    ELSE
+	G_msg_index := p_msg_index ;
+    END IF;
+
+    SELECT MESSAGE_TEXT, PACKAGE_NAME, PROCEDURE_NAME, RUN_DATE, EVENT_NAME, PK_NAME, PK_VALUE, MESSAGE_TYPE
+    INTO   P_MESSAGE, P_PACKAGE_NAME ,P_PROCEDURE_NAME,P_RUN_DATE, P_EVENT_NAME ,P_PK_NAME , P_PK_VALUE,P_MESSAGE_TYPE  
+    FROM    FXGN_DEBUG
+    WHERE   REQUEST_ID = G_REQUEST_ID
+    AND     MSG_INDEX =  P_MSG_INDEX
+    ;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+	--  No more messages, revert G_msg_index and return NULL;
+	G_msg_index := l_msg_index;
+	p_message	:=  NULL;
+        p_PACKAGE_NAME := NULL;
+        p_PROCEDURE_NAME := NULL;
+	p_RUN_DATE := NULL;
+        p_EVENT_NAME := NULL;
+        p_PK_NAME := NULL;
+        p_PK_VALUE := NULL;
+
+ WHEN OTHERS THEN
+   	G_msg_index := l_msg_index;
+END Get; 
+
+END FXGN_DEBUG_PKG;
+
+
+
+
+
+
+
+
